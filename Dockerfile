@@ -5,17 +5,18 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    gcc curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY pyproject.toml .
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    uv pip install --system -e .
+# Install uv
+RUN pip install --no-cache-dir uv
 
-# Copy application code
+# Copy ALL source code first (needed for editable install)
 COPY . .
+
+# Install PyTorch (CPU version) and project dependencies
+RUN uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    uv pip install --system -e .
 
 # Expose port
 EXPOSE 8765
