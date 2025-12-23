@@ -1,0 +1,453 @@
+
+%===============================================================================
+% ifacconf.tex 2025-07-31 jpuente  
+% 2022-11-11 jpuente change length of abstract
+% 2025-07-31 jldiez added section on the use of AI
+% Template for IFAC meeting papers
+% Copyright (c) 2025 International Federation of Automatic Control
+%===============================================================================
+\documentclass{ifacconf}
+
+\usepackage{graphicx, subfigure}      % include this line if your document contains figures
+\usepackage{natbib}        % required for bibliography
+\usepackage{amsmath}
+\usepackage{amssymb}
+\newtheorem{definition}{Definition}
+%===============================================================================
+\begin{document}
+\begin{frontmatter}
+
+\title{Toward Certifiable Robotic Surgery Policy via a Markov Decision Process Framework\thanksref{footnoteinfo}} 
+% Title, preferably not more than 10 words.
+
+\thanks[footnoteinfo]{This work was partially supported by the National Natural Science Foundation of China (62273286), GRF (17200124), the Shenzhen-Hong Kong-Macau Technology Research Programme (SGDX20230821091559019), the Guangdong Basic Research and Applied Research Fund (2024A1515011509), the Research Grants Council of Hong Kong (STG1/E-401/23-N, C4026-21G, 17209021), and the Multi-scale Medical Robotics Center, AIR@InnoHK.}
+
+\author[First]{Zhiyi Zhong}, 
+\author[Second]{Lin Lin}, 
+\author[Third]{Jing Dai},
+\author[First]{James Lam},
+\author[Forth]{Ka-Wai Kwok}
+
+\address[First]{Department of Mechanical Engineering, The University of Hong Kong, Pokfulam Road, Hong Kong, China (e-mail: jeffreyzzy@outlook.com; james.lam@hku.hk).}
+\address[Second]{School of System Design and Intelligent Manufacturing, Southern University of Science and Technology, Shenzhen, China, and Multi-Scale Medical Robotics Center Limited, Hong Kong, China  (e-mail: linlin00wa@gmail.com)}
+\address[Third]{Multi-Scale Medical Robotics Center Limited, Hong Kong, China, and Department of Mechanical and Automation Engineering, The Chinese University of Hong Kong, Hong Kong, China  (e-mail: jingdai@mrc-cuhk.com)}
+\address[Forth]{Department of Mechanical and Automation Engineering, The Chinese University of Hong Kong, Hong Kong, China (email: kwokkw@mae.cuhk.edu.hk)}
+
+% \begin{abstract}                % Abstract of 50--100 words
+% Robotic soft tissue surgery is inherently challenged
+% by tissue dynamics, anatomical variations, and unpredictable
+% physiological responses. These factors act as perturbations that
+% can lead to suboptimal outcomes or even procedural failure.
+% While current control strategies often rely on real-time sensing
+% and adaptive algorithms, they lack a formal framework to rigorously guarantee robustness against disturbances. In this work, we address this gap by modeling the resection of a target
+% tissue mass as a discrete-state Markov process, where each state
+% represents the progressive removal of target tissue, with complete
+% resection as the absorbing target state. Robotic actions (e.g., grasp, cutting, cauterization) serve as control inputs that drive
+% state transitions toward this objective. By simulating surgical control into perturbed Markov chain model, we leverage advances in robustness analysis to provide offline stability certificates. This framework provides a potential foundation for developing predictive and guaranteed robotic surgical systems.
+% \end{abstract}
+
+\begin{abstract}
+This paper introduces a certification framework that analyzes deep reinforcement learning policies by representing the generated surgical plans as explicit Markov decision processes, given that current learning-based control policies cannot provide formal safety guarantees.  
+First, the feasibility condition of a surgical plan is established by two conditions: absorption stability at the target state and finite-time reachability to it. After the feasibility assessment, a quantitative robustness index is derived from a reachability-layer decomposition. This index measures the resilience of the surgical plan to perturbations of individual state transitions. Finally, the theoretical approach has been implemented in an interactive visual interface that integrates both verification and evaluation modules. The effectiveness of this framework has been verified through an illustrative simulation on an ultrasound navigation, which reveals the critical transitions required to reach the target position. 
+\end{abstract}
+
+\begin{keyword}
+Markov decision process; Markov chain; Robotic surgery; Stability 
+\end{keyword}
+
+\end{frontmatter}
+%===============================================================================
+
+\section{Introduction}
+Surgical robots have brought new approaches to minimally invasive intervention. Their capacity to enhance procedural precision, dexterity, and visualization, has led to their rapidly expanding adoption across medical domains (\cite{peters2018review}). As these systems evolve from assistive tools towards more autonomous partners, they are expected to master an increasing number of well-defined sub-tasks. These tasks range from extra-body navigation and intra-body tissue manipulation to percutaneous procedures (\cite{qian2025deep}). However, the inherent complexity, anatomical heterogeneity, and dynamic decision-making required in real-world surgery expose the fundamental limitations of pre-programmed robotic frameworks, creating the need for more adaptive systems.
+
+
+In response to this need, deep reinforcement learning (DRL) has emerged as a particularly promising approach. Surgical environments inherently combine high-dimensional visual observations, patient-specific anatomical heterogeneity, and rapidly changing soft-tissue dynamics, all of which are extremely difficult to model analytically (\cite{scheikl2022sim}). The model-free and experience-driven learning paradigm of DRL is especially suitable here, as it allows control policies to be acquired directly from interaction. Accordingly, surgical robots can learn robust visuomotor policies in environments dominated by soft-tissue deformation, sensor noise, and physiological motion, where traditional controllers fail (\cite{nguyen2019review}).
+
+
+However, high performance in simulation does not guarantee safety in clinical practice. Several studies have shown that DRL policies often perform poorly under real disturbances. These disturbances include unexpected anatomical heterogeneity, visual occlusions, or minor instrument perturbations. They are likely to cause catastrophic policy failures despite high nominal accuracy of the policies in training environments (\cite{pore2021safe,ao2025saferplan}).
+This issue originates from a deeper limitation of DRL: the structural opacity of latent neural representations. As these representations lack an interpretable mapping to the surgical state, it is not possible to formally verify critical state transition properties, such as reachability or collision avoidance (\cite{pore2021safe}). 
+% Moreover, similar to finite-time stability in dynamic system control (\cite{li2022distributed}), it is crucial for patient safety that a surgical plan can reliably reach its goal within a bounded time.
+In contrast, rigorous methodologies such as finite-time formation control (\cite{li2022distributed}), barrier function-based reinforcement learning (\cite{liu2024variable}), and rapid learning-based aberration correction for MRI-guided interventions (\cite{dai2025learning}) have been successfully employed to enforce stability and safety constraints in low-level control. However, establishing similar guarantees at the high-level planning stage remains a significant challenge.
+Without such mathematical guarantees, a DRL-based surgery plan might not meet the rigorous requirements in realistic clinical applications.
+
+
+Therefore, the main difficulty lies in how to supplement the adaptive power of DRL with formal verification to meet clinical standards. This work tries to handle this issue by incorporating the Markov decision process (MDP) framework to analyze surgical plans derived from DRL. We contend that grounding a ``black-box'' policy within a transparent MDP provides the necessary mathematical foundation for certification. In this framework, states, actions, transitions, and objectives are explicitly stated. This formalization enables us to establish a standard performance metric for DRL-derived surgery policy and to study the robustness to uncertainty.
+
+The main contributions of this work are as follows. First, we present an approach to represent a surgical process as an MDP. This provides an interpretable mathematical model that illustrates the sequential decision-making process of the robot. Second, we demonstrate how this MDP abstraction enables a suite of analyses, including robustness quantification and stability verification, that are intractable with an opaque DRL policy alone. Third, we integrate DRL-based policy with post-hoc MDP analysis into a cohesive framework, providing a structured path toward developing high-performance, yet analyzable and certifiable, autonomous surgical systems.
+
+
+The remainder of this paper is organized as follows.
+Section 2 details the proposed MDP formalization. Section 3 describes the certification analyses it enables. Section 4 presents an illustrative example validation, followed by the conclusion in Section 5. 
+
+
+
+\section{An MDP framework for Surgical plan formalization}
+
+To reconcile the adaptive performance of data-driven policies with the need for certifiable guarantees, we formalize surgical plans using an MDP framework. The core of our approach is to derive the components of this MDP from a DRL policy and effectively extract an interpretable, discrete-state model from the opaque neural controller.
+
+\subsection{From Learned Policies to Formal Models}
+
+A well-trained DRL policy operates through a perceptual loop of encoding observations and executing actions. However, this mechanism makes such policies high-level decision-making strategies (\cite{mnih2013playing}). Thus, our goal is to make those strategies understandable and analyzable. Specifically, we leverage the DRL policy as a source for defining key elements of the MDP model: 
+\begin{itemize}
+    \item {\em State space $\mathcal{S}$}: a finite set obtained by discretizing the latent representations of the agent encoder. This process translates continuous sensory inputs into a finite set of states.
+    \item {\em Action space $\mathcal{A}$}: a set of pre-defined surgical motion primitives, each of which executes a closed-loop precise motion path when invoked. The policy deep neural network selects one macro-action at each decision epoch.
+    \item {\em Transition dynamics $\mathbb{P}$}: transition probability among states. It is estimated by observing the system evolution under the DRL policy in a simulated environment.
+\end{itemize}
+
+Next, we illustrate this derivation process using the robotic ultrasound navigation system of \cite{hase2020ultrasound} as a canonical example. As shown in Fig. \ref{fig:us-navigation}, their DRL agent learns to navigate a probe within a discretized grid over the lower back until the agent reaches the anatomical region corresponding to the sacrum. This perception-action loop can be formally mapped to an MDP as follows: 1) the MDP state is defined as the discrete position of the probe on a grid over the anatomy; 2) the action space comprises discrete movements: ${\text{up, down, left, right, stop}}$; 3) the transition probability $\mathbb{P}\{s_j \mid s_i, a\}$ models the likelihood of successfully moving to an adjacent grid cell, capturing uncertainty in motion execution and tissue contact; 4) the DRL reward function encourages reaching the target sacrum position quickly.
+
+As the state is not directly observable, an observation in the form of an ultrasound frame is required for state inference. This formulation is illustrated in Fig. \ref{fig:us-navigation}, where the lower back of the patient is discretized into a grid.
+In this schematic, blue nodes represent possible probe positions (MDP states), green arrows denote admissible actions, and the red node marks the target state $s_T$. The corresponding ultrasound image exemplifies the observation from which the current state is inferred.
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.43\textwidth]{ifac2026/figures/us-navigation.jpg}
+    \caption{Schematic diagram of the perception-action loop in the ultrasound navigation system, and its corresponding MDP model. }
+    \label{fig:us-navigation}
+\end{figure}
+
+
+\subsection{MDP Formulation of the Surgical Process}
+
+We formalize the surgical decision-making process as a finite MDP (\cite{lin2024learning}), defined by the tuple:
+\begin{equation}
+\text{MDP} = (\mathcal{S}, \mathcal{A}, \mathbb{P}, \mathbb{R}, \gamma).
+\end{equation}
+Here, the finite set $\mathcal{S}=\{s_1,\ldots,s_N\}$ encapsulates all relevant configurations of the robot and the surgical environment. Besides, set $\mathcal{A}$ contains the discrete macro-actions available to the robot at the plan level, such as incremental probe motions or tool manipulations, depending on the surgical task. Then, the transition kernel $\mathbb{P}\{s_j \mid s_i, a\}$ specifies the probability of transitioning to state $s_j\in \mathcal{S}$ after taking action $a\in \mathcal{A}$ in state $s_i\in \mathcal{S}$. Thus, transition dynamics $\mathbb{P}$ capture the intrinsic stochasticity of the surgical environment, including soft tissue deformation, sensor noise, and variability in tool-tissue interaction. It provides a probabilistic abstraction of the underlying physical interactions, which are characteristic of stochastic nonlinear systems (\cite{yuan2022fast}) and typically require adaptive learning-based strategies for effective control (\cite{wu2024reinforcement}. Furthermore, the reward function $\mathbb{R}(s_j, a,s_i)$ provides immediate feedback during the DRL training process, which shapes the policy to achieve task objectives like reaching a target state.
+The scalar $\gamma\in[0,1)$ weights the importance of immediate versus future rewards.
+
+A surgical plan is formally represented by a stationary policy $\pi (a \mid s)$, which can be obtained via DRL. Under this policy, the closed-loop system behavior is characterized by a discrete-time Markov chain (DTMC). The state transition matrix of this DTMC is defined as
+\begin{equation}
+\mathbb{P}_\pi(s_i,s_j)
+    := \sum_{a\in\mathcal{A}} \pi(a\mid s_i)\, \mathbb{P}\{s_j \mid s_i,a\}.
+\label{eq:closedloop}
+\end{equation}
+which defines the evolution of the DTMC $\{s_t\}_{t \geq 0}$ such that
+\begin{equation}
+\mathbb{P}\{s_{t+1}=s_j \mid s_t=s_i\} = \mathbb{P}_\pi(s_i,s_j).
+\end{equation}
+
+Although the DRL-derived policy $\pi^*$ is optimized to maximize the expected discounted return as
+\begin{equation}
+\pi^{*}
+= 
+\arg\max_{\pi} \;
+\mathbb{E}_\pi
+\left[
+\sum_{t=0}^{\infty} \gamma^{t} r(s_t,a_t)
+\right],
+\end{equation}
+this criterion only ensures performance in expectation. It fails to provide formal guarantees on sample-path behaviors, such as finite-time convergence to a target state $s_T$. These properties are critical in surgical applications where rare failures are unacceptable. Consequently, the closed-loop DTMC defined in \eqref{eq:closedloop} provides the necessary formal foundation for evaluating the feasibility and safety of a DRL-generated surgical plan.
+
+\section{MDP-based Certification Analysis for Robotic Surgery Plan}
+
+This section develops a formal certification framework for surgical plans derived from DRL. The core objective is to verify the closed-loop behavior of the autonomous system, governed by the DRL policy, satisfies the convergence to a designated target state with probability one. We first establish a necessary and sufficient condition for this feasibility property using the DTMC formulation from Section 2. Subsequently, we extend this binary feasibility notion to a continuous robustness measure, which quantifies the plan's resilience to transition perturbations.
+
+\subsection{Feasibility Analysis of Robotic Surgical Plans}
+
+Let $s_T\in\mathcal{S}$ denote the target state, corresponding to the successful completion of the surgical task (e.g., precise needle placement or target tissue resection).The feasibility of a surgical plan is defined with respect to its induced closed-loop dynamics as follows.
+\begin{definition}[Feasible Surgical Plan]
+\label{def-feasible-plan}
+Given a target state $s_T\in\mathcal{S}$ and a maximum allowed operation time $T_{\text{max}}\in \mathbb{Z}_+$, a surgical plan is said to be feasible if its corresponding closed-loop DTMC $\mathbb{P}_\pi$ is stable at state $s_T$ from any initial state within $T_{\text{max}}$ transitions.
+\end{definition}
+
+
+To formalize the notion of reachability, we partition the state space into the target state set $\mathcal{S}_{T}=\{s_T\}$ and the set of transient states $\mathcal{S}_{R}=\mathcal{S}\setminus \mathcal{S}_{T}$. We define a one-step indicator function for any transition $(s_i , s_j)$ as 
+\begin{equation}
+r(s_i, s_j)
+=
+\begin{cases}
+1, & s_j = s_T,\\
+0, & \mathrm{otherwise},
+\end{cases}
+\label{eq:indicator}
+\end{equation}
+which signals whether the transition enters the target state. For an initial state $s_i \in S_R$, the $T$-step reachability probability is defined as
+\begin{equation}
+v_\pi(s_i, T)
+=
+\mathbb{E}_\pi\!\left[
+    \bigvee_{t=0}^{T-1} 
+    r(s_t, s_{t+1})
+    \,\Big|\, s_0 = s_i
+\right],
+~T \in \mathbb{Z}_+,
+\label{eq:vpi}
+\end{equation}
+where $\bigvee_{t=0}^{T-1}$ denotes the logical disjunction over the time steps. This expression quantifies the probability of reaching $s_T$ within $T$ transitions. Owing to the finiteness of the state space and the time-invariance of $\mathbb{P}_\pi$, the sequence $\{v_\pi(s_i, T)\}_{T\ge 1}$ is monotonically non-decreasing and upper-bounded by $1$.
+
+The following theorem provides the foundational criteria for certifying a surgical plan as feasible.
+
+\begin{thm}
+\label{thm-feasibility}
+Let $\mathbb{P}_\pi$ be the closed-loop DTMC induced by a DRL policy $\pi$. Given a maximum operation time $T_{\text{max}}\in \mathbb{Z}_+$, the surgical plan is feasible if and only if the following two conditions hold:
+\begin{enumerate}
+    \item[1)] Absorption: $\mathbb{P}_\pi(s_T,s_T)=1$;
+    
+    \item
+    [2)] Finite-time $s_T$-reachability: for every initial state $s_0\in \mathcal{S}_R$, there exists 
+    an integer $T\leq T_{\text{max}}$ such that
+\begin{equation}\label{eq-finite_time}
+v_\pi(s_0, T) = 1.
+\end{equation}
+\end{enumerate}
+\end{thm}
+
+\begin{pf} 
+(Necessary.) Assume the surgical plan is feasible according to \ref{def-feasible-plan}. Then, the requirement that the system remains at $s_T$ upon arrival is equivalent to the absorbing condition $\mathbb{P}_\pi(s_T,s_T)=1$. Hence, condition 1) is necessary. Furthermore, the requirement that $s_T$ is reachable from any initial sate $s_0\in\mathcal{S}_R$ within $T_{\text{max}}$ time steps implies that $v_\pi(s_0, T) = 1$ for some $T\leq T_{\text{max}}$, establishing the necessity of condition 2).
+
+(Sufficiency.) Conversely, if conditions 1) and 2) hold, then for any $s_0\in\mathcal{S}_R$, there exists an integer $T\leq T_{\text{max}}$ such that $v_\pi(s_0, T) = 1$, i.e., the system reaches $s_T$ by time $T$ with probability one. Since $s_T$ is absorbing by Condition 1), the system remains at state $s_T$ for all $t\geq T$. Therefore, the feasibility definition for surgical plans is satisfied.
+\hfill $\square$\end{pf}
+
+
+%Although condition 1) ensures stability upon reaching $s_T$, the feasibility of the surgical plan also requires that $s_T$ is reachable from all admissible initial states $s_0\in\mathcal{S}_R$ within $T_{\text{max}}$ time-steps. Thus, it implies condition 2) is necessary. Conversely, the $T$-time reachability of DTMC model, combining with $s_T$ being absorbing, guarantees that
+%\begin{equation}
+%v_\pi(s_0, t) = 1,
+%\qquad \forall~ t\geq T.
+%\label{eq:finite_time}
+%\end{equation}
+
+In practice, the target state $s_T$ reflects a completed surgical maneuver, such as completing a retraction or positioning a tool at a prescribed anatomical landmark.
+The absorption condition at state $s_T$ then ensures that the system remains in this successful configuration, which can be reflected by a stable acoustic view in the ultrasound navigation process. In particular, the finite‐time reachability condition excludes pathological behaviors often exhibited by DRL policies, including convergence to incorrect absorbing states, limit cycles, or non‐terminating trajectories due to environmental stochasticity.
+
+%These conditions provide a formal certification that the policy satisfies structural safety requirements beyond average‐case performance metrics. Failure to meet either condition may lead to critical failure modes, such as anatomical dead‐ends or perpetual loops, that are not captured by standard reward‐based evaluation. This analysis underscores that DTMC‐based verification is essential for pre‐deployment validation of autonomous surgical systems in safety‐critical applications where rare failures are unacceptable.
+
+
+
+
+
+\subsection{Quantitative Evaluation of Certifiable Surgical Plan}
+
+The feasibility conditions in Theorem \ref{thm-feasibility} provide a binary certificate for surgical plans under nominal dynamics. This section extends to a robustness evaluation for the resilience of surgical plans under functional perturbations. Building on the formulation in \cite{lin2025ctmc}, we define robustness as the preservation of surgical plan feasibility (as in Definition \ref{def-feasible-plan}) under the transition perturbation on the state transition matrix $\mathbb{P}_\pi$.
+
+To formalize this, we model a localized perturbation that redirects the probability mass of a single transition $(s_i, s_j)$ to $(s_i,s_{j'})$. For a nominal transition
+$(s_i, s_j)$ with  $\mathbb{P}_\pi(s_i,s_j) > 0$, the perturbed transition matrix $\widetilde{\mathbb{P}}_\pi$ is defined as
+\begin{equation*}
+\widetilde{\mathbb{P}}_\pi(s_l,s_r)=\left\{\begin{array}{ll}
+ 0, &(l,r)=(i,j), \\
+\mathbb{P}_\pi(s_i,s_{j'}) + \mathbb{P}_\pi(s_i,s_j), &(l,r)=(i,j'), \\
+\mathbb{P}_\pi(s_l,s_r), &\mathrm{otherwise},
+\end{array}\right.
+\end{equation*}
+where $j'$ is the alternative successor. Hereafter,
+we consider a worst-case perturbation as the complete redirection of probability mass from $s_i$ towords $s_j$ to towards $s_{j'} \neq s_j$. It represents a worst-case local failure, such as a surgical tool slipping from its intended target or an erroneous navigation due to visual occlusion. 
+
+The impact of this perturbation is assessed through its effect on the state-space connectivity to the target $s_T$. 
+We leverage the reachability layer decomposition from Section 3.1, where layers $\mathcal{L}[t]$ are defined iteratively:
+\begin{equation*}
+\left\{\begin{array}{l}
+    \mathcal{L}[0]=\{s_T\},\\
+    \mathcal{L}[t]=\Big\{
+s_i \in \mathcal{S}\setminus \bigcup_{l=0}^{t-1}\mathcal{L}[l]
+\mid \\
+~~~~~~~~~~~~~
+\exists\, s_j\in \mathcal{L}[t-1], \text{ s.t.}~ P_\pi(s_i,s_j)>0
+\Big\},~t\geq 1.
+ \end{array}\right.  
+\end{equation*}
+Since the state space $\mathcal{S}$ is finite, the surgical plan is feasible if there exists an integer $T\leq |\mathcal{S}|$ such that $$\bigcup_{t=0}^{T} \mathcal{L}[t] = \mathcal{S}.$$ 
+The layer index $l(s_i)$ of a state $s_i$ is defined as the unique integer for which $s \in \mathcal{L}[l]$.
+Furthermore, a transition $(s_i,s_j)$ is a forward-progress transition if $s_j \in \mathcal{L}[l(i)-1]$. These transitions lie on a shortest path to the target state $s_T$ and are critical for finite-time reachability. Disabling such a transition under perturbation may render parts of the state space unreachable.
+
+To identify the affected states, we analyze the resulting state transition matrix $\widetilde{\mathbb{P}}_\pi$.
+The $T_{\text{max}}$-step reachability matrix for the perturbed DTMC model is 
+\begin{equation}
+\mathrm{R}(i,j) = \sum_{t=1}^{T_{\text{max}}} (\widetilde{\mathbb{P}}_\pi)^t, 
+\end{equation}
+where $(\widetilde{\mathbb{P}}_\pi)^t$ denotes the $t$-step transition probability matrix under perturbation.
+Regarding the perturbed dynamics $\widetilde{\mathbb{P}}_\pi$,
+we denote $\Omega(i,j) \subseteq \mathcal{S}$ as the disconnected state set, whose states cannot reach any state in layers $\mathcal{L}[0],\mathcal{L}[1], \ldots, \mathcal{L}[l(i)]$, within $T_{\text{max}}$ time steps. It can be mathematically defined as 
+\begin{equation}
+\label{eq-omega_def}
+\Omega(i,j) = \left\{ s_k \in \mathcal{S} \mid [\mathrm{R}(i,j)]_{t,k} = 0, \forall s_t \in \bigcup_{m=0}^{l(i)} \mathcal{L}[m]\right\},
+\end{equation}
+where $[\mathrm{R}(i,j)]_{t,k}=0$ indicates no admissible path from state $s_k$ to any state in set $\bigcup_{m=0}^{l(i)} \mathcal{L}[m]$ within $T_{\text{max}}$ time steps. 
+To be computationally efficient, this disconnected state set can be calculated through the following iterative process, which aligns with the principles of efficient connectivity determination in complex directed networks (\cite{zhong2025connectivity}):
+\begin{equation*}\left\{\begin{array}{l}
+\mathbb{I}_0(i,j)=\mathcal{S}\backslash \bigcup_{m=0}^{l(i)} \mathcal{L}[m];\\
+\mathbb{I}_\tau(i,j)=\Big\{s_k\in \mathbb{I}_{\tau-1}(i,j) \bigm| \sum\limits_{s_t\in \mathcal{S}\setminus \mathbb{I}_{\tau-1}}\widetilde{\mathbb{P}}_\pi(s_k,s_t)=0\Big\},
+\end{array} 
+\right.\end{equation*}
+where $\tau\geq 1$. Owing to the finite state space, there must exist a positive integer $K\leq |\mathbb{I}_0(i,j)|$ such that $\mathbb{I}_{K}(i,j)=\mathbb{I}_{K+1}(i,j)$, and then this iteration terminates at $\mathbb{I}_{K}(i,j)$. Based on this, we can value the disconnected state set $\Omega(i,j)$ as follows:
+\begin{equation*}\Omega(i,j)=\left\{\begin{array}{ll}
+\mathbb{I}_{K}(i,j),&\mathrm{if}~ K\leq T_{max}-l(i),\\
+\mathbb{I}_{T_{max}-l(i)}(i,j), &\mathrm{otherwise}.
+\end{array} 
+\right.\end{equation*}
+Note that a non-empty $\Omega(i,j)$ indicates a violation of the reachability condition in Theorem \ref{thm-feasibility}.
+
+Furthermore, the robustness index of transition $(s_i, s_j)$ is defined as
+\begin{equation}\label{eq-inx}
+\rho(i,j)
+=
+1 - \frac{|\Omega(i,j)|}{|\mathcal{S}| - 1}.
+\end{equation}
+This metric quantifies the fraction of the state space that remains connected to $s_T$ after the perturbation. A plan is considered robust with respect to the failure of $(i,j)$-transition if $\rho(i,j) = 1$.
+
+To operationalize the proposed certification framework, we have developed an interactive Robotic Surgery Plan Certification System, whose interface is shown in Fig. \ref{fig-vis}. Users can input an adjacency list (in JSON format) and specify the target state $s_T$ via the control panel. The system then executes the embedded algorithms to compute and visually present the results of both feasibility and robustness analyses for the surgical plan.
+
+
+\begin{figure*}[h!]
+\centering
+
+\subfigure[System interface overview]{
+    \includegraphics[scale=0.28]{ifac2026/figures/visualization.png}
+    \label{fig-vis-overview}
+}
+\subfigure[Network visualization region]{
+    \includegraphics[scale=0.235]{ifac2026/figures/visualization-A.png}
+    \label{fig-vis-b}
+}
+\subfigure[MDP-based certification result]{
+    \includegraphics[scale=0.28]{ifac2026/figures/visualization-B.png}
+    \label{fig-vis-c}
+}
+
+\caption{Overview of the robotic surgery plan certification system. (A) The control panel allows users to input the adjacency list in JSON format (A1) and specify the target state $s_T$ (A2), with buttons for visualizing and analyzing the transition graph. Clicking ``Visualize'' renders the MDP model of the surgical plan in the network visualization region (B). Clicking ``Analyze'' triggers the certification process: the graph in (B) is updated to highlight vulnerable transitions in red with their corresponding $\rho$ values, the certification statistics panel (A3) reports plan feasibility and the number of critical transitions. Simultaneously, the transition certification results table (C) lists each analyzed transition, its associated invariant set (if it exists), and its robustness index $\rho$.}\label{fig-vis}
+\hrulefill
+\end{figure*}
+
+
+\section{Simulation on an Ultrasound Navigation System}
+
+This section validates the proposed certification framework using the ultrasound navigation system introduced in Section 2.1 and illustrated in Fig.~\ref{fig:us-navigation}. To more flexibly demonstrate the capabilities of this framework, we extend the action space beyond the limited cardinal motions (e.g., up, down, left, right, and stop) used in prior work (\cite{hase2020ultrasound}). Instead, we adopt a more expressive action
+parameterization following \cite{li2021autonomous}.
+
+In this formulation, the agent manipulates the full six-degree-of-freedom pose of the ultrasound probe through a discrete action space. At each decision step, the probe can translate along its local $x$- and $y$-axes in increments of $d_{\text{step}} = 5\,\text{mm}$, or rotations about its local $x$, $y$, and $z$ axes in increments of $\theta_{\text{step}} = 5^\circ$. This parameterization enables fine-grained adjustments of both position and orientation. An example of the resulting state space $\mathcal{S}$ is shown in the transition graph of Fig. \ref{fig:us-policy}. The target state, corresponding to the sacrum position, is labeled $s_T = 22$ (highlighted in red). All other states $1,2,\ldots,29$ are transient with nodal colors indicating their assigned reachability layer. The curved arrows in the figure denote valid state transitions and do not represent the complete transition pattern of the underlying dynamics.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.43\textwidth]{ifac2026/figures/us-with-tg.png}
+    \caption{State transition graph of the learned ultrasound navigation policy. }
+    \label{fig:us-policy}
+\end{figure}
+
+Applying the reachability layer decomposition defined in Section 3.1, we partition the state space $\mathcal{S}$ into the following layers:
+\begin{equation*}
+\begin{array}{l}
+\mathcal{L}[0] = \{0\},~ 
+\mathcal{L}[1] = \{1, 2, 3\}, ~
+\mathcal{L}[2] = \{4, 5, 6, 7\},\\ 
+\mathcal{L}[3] = \{8, 9, 10\},~
+\mathcal{L}[4] = \{11, 12, 13, 14\},~
+\\
+\mathcal{L}[5] = \{15, 16, 17, 18, 19\},~ \\
+\mathcal{L}[6] = \{20, 21, 22, 23, 24\},~ 
+\mathcal{L}[7] = \{25, 26, 27, 28\},~
+\\
+\mathcal{L}[8] = \{29\}, \\
+\end{array}
+\end{equation*}
+The decomposition depth is $T=8$, which satisfies $\bigcup_{t=0}^{T} \mathcal{L}[t] = \mathcal{S}$. Furthermore, state $0$ has no outgoing transitions, i.e., $\mathbb{P}\pi(0, j) = 0$ for all $j \neq 0$. This confirms that $s_T = 0$ is absorbing, satisfying Condition (1) of Theorem \ref{thm-feasibility}. Together with the layered structure that guarantees reachability from all states, this verifies that the system meets the feasibility criteria of Theorem \ref{thm-feasibility}, thereby certifying it as a feasible surgical plan under nominal dynamics.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.35\textwidth]{ifac2026/figures/robust-indicator.png}
+    \caption{Robustness index calculation for all transitions in ultrasound navigation policy.}
+    \label{fig:robust-indicator}
+\end{figure}
+
+Next, we evaluate the robustness of this surgical plan by computing the robustness index $\rho(i,j)$ defined in (\ref{eq-inx}). The results are visualized in Fig. \ref{fig:robust-indicator}, where edge weight corresponds to the value of $\rho(i,j)$; edges with $\rho(i,j) = 1$ are omitted from the visualization for clarity. For example, $\rho(11,8)=0.862$ indicates a susceptibility to reachability loss under perturbation. Removing this transition creates an invariant set $\Omega(11,8) = \{11, 15, 20, 26\}$, as defined in \eqref{eq-omega_def}, which disconnects four states from the target and violates the finite-time reachability requirement of Theorem \ref{thm-feasibility}. 
+
+In real practice, this corresponds to a scenario where visual occlusion occurs during probe movement from state $11$ to $8$. This perturbation will prevent the system from following its intended navigation path. Consequently, the system becomes trapped in a region from which the sacrum cannot be reached. Critically, repeated execution of the policy cannot recover from this state, as the $s_T$-reachability required for task completion has been broken. This form of failure is not detectable through standard reward-based evaluation in the simulated environment. It underscores the need for formal certification analysis to ensure the safe deployment of autonomous surgical systems.
+
+
+
+\section{Conclusion and Discussion}
+This paper has developed an MDP framework for the formal certification of DRL-generated surgical plans. By abstracting DRL-generated surgical plans into DTMCs, we have established verification criteria for two essential properties: finite-time reachability to a target state and its subsequent absorption. The validation on a simulated ultrasound navigation task has demonstrated that this framework effectively identifies vulnerable transitions. If these transitions are disrupted by disturbances, the system will be trapped in unrecoverable regions of the state space and thus violate the feasibility of the surgical plan.
+Crucially, such failure modes might not be identified by conventional reward-based performance metrics. However, by quantifying robustness through the index $\rho(i,j)$, our approach provides an interpretable way to certify the reliability of autonomous surgical systems. Consequently, the gap between data-driven adaptability of DRL policies and clinical-grade assurance has been bridged.
+
+This certification framework enables potential applications in three key areas. First, robustness indices allow surgeons to select the safest pre‑operative plans based on quantified risk. Second, the system acts as an online assurance monitor, which triggers fallbacks if identified vulnerabilities arise during execution. Finally, these formal guarantees can be fed back into the learning process by transforming robustness into a trainable objective for future policies. Collectively, these directions translate our formal analysis into practical tools for building trustworthy autonomous surgical systems.
+
+
+% risk‑aware surgical planning, where robustness indices guide pre‑operative plan selection; online assurance systems, where identified vulnerabilities trigger runtime fallbacks; and resilience‑driven policy optimization, where guaranteed success becomes a trainable objective.
+
+% Our validation on an ultrasound navigation system demonstrates how this approach exposes hidden structural vulnerabilities whose failure disconnects a portion of states from the target that remain undetectable through conventional reward-based evaluation. This certification methodology directly addresses the clinical imperative that "rare failures are unacceptable" by transforming opaque DRL policies into analyzable, verifiable surgical plans. The framework's ability to quantify robustness through metrics like the structural index $inx(i,j)$ provides actionable insights for targeted policy improvement, moving beyond empirical performance toward guaranteed safety. Ultimately, this work bridges the critical gap between adaptive learning and clinical trust, establishing a necessary foundation for the safe deployment of autonomous robotic systems in real-world operating rooms where failure is not an option. By enabling offline verification of worst-case behaviors, our approach paves the way for surgical robots that maintain rigorous safety guarantees while adapting to the dynamic realities of human anatomy.
+
+%Future work might extend this framework beyond retrospective certification toward online runtime monitoring and active safety enforcement. We aim to leverage the identification of vulnerable transitions to design proactive protection layers: specifically, by monitoring the proximity of the system to structural bottlenecks or vulnerabilities, future controllers could automatically revert to conservative strategies or solicit supervisory confirmation before connectivity is compromised. Additionally, we might investigate human-in-the-loop recovery protocols where, in the event of a perturbation into an infeasible invariant set, the system can guide minimal manual intervention to restore the robot to a valid reachability layer. Ultimately, we might propose this worst-case connectivity analysis to serve as a standard benchmark for surgical autonomy, shifting evaluation focus from stochastic rewards to the deterministic topological resilience required for clinical viability.
+
+
+%-------------------------------------------------------------------------
+
+
+% \newpage
+% \newpage
+
+
+
+% \begin{thm}   % use the thm environment for theorems
+% The square of the length of the hypotenuse of a right triangle equals
+% the sum of the squares of the lengths of the other two sides.
+% \end{thm}
+
+% \begin{pf}    % and the pf environment for proofs
+% The square of the length of the hypotenuse of a right triangle equals the sum of the squares 
+% of the lengths of the other two sides.
+% \end{pf}
+
+%% There are a number of predefined theorem-like environments in
+%% ifacconf.cls:
+%%
+%% \begin{thm} ... \end{thm}            % Theorem
+%% \begin{lem} ... \end{lem}            % Lemma
+%% \begin{claim} ... \end{claim}        % Claim
+%% \begin{conj} ... \end{conj}          % Conjecture
+%% \begin{cor} ... \end{cor}            % Corollary
+%% \begin{fact} ... \end{fact}          % Fact
+%% \begin{hypo} ... \end{hypo}          % Hypothesis
+%% \begin{prop} ... \end{prop}          % Proposition
+%% \begin{crit} ... \end{crit}          % Criterion
+
+% Of course LaTeX manages equations through built-in macros. You may
+% wish to use the \texttt{amstex} package for enhanced math
+% capabilities.
+
+
+
+% \section{Conclusion}
+
+% A conclusion section is not required. Although a conclusion may review
+% the main points of the paper, do not replicate the abstract as the
+% conclusion. A conclusion might elaborate on the importance of the work
+% or suggest applications and extensions.
+
+%\begin{ack}
+%This work was partially supported by the National Natural Science Foundation of China (62273286), GRF (17200124), the Shenzhen-Hong Kong-Macau Technology Research Programme (SGDX20230821091559019), the Guangdong Basic Research and Applied Research Fund (2024A1515011509), the Research Grants Council of Hong Kong (STG1/E-401/23-N, C4026-21G, 17209021), and the Multi-scale Medical Robotics Center, AIR@InnoHK.
+%\end{ack}
+
+\bibliography{ifacconf}             % bib file to produce the bibliography
+                                                     % with bibtex (preferred)
+                                                   
+%\begin{thebibliography}{xx}  % you can also add the bibliography by hand
+
+%\bibitem[Able(1956)]{Abl:56}
+%B.C. Able.
+%\newblock Nucleic acid content of microscope.
+%\newblock \emph{Nature}, 135:\penalty0 7--9, 1956.
+
+%\bibitem[Able et~al.(1954)Able, Tagg, and Rush]{AbTaRu:54}
+%B.C. Able, R.A. Tagg, and M.~Rush.
+%\newblock Enzyme-catalyzed cellular transanimations.
+%\newblock In A.F. Round, editor, \emph{Advances in Enzymology}, volume~2, pages
+%  125--247. Academic Press, New York, 3rd edition, 1954.
+
+%\bibitem[Keohane(1958)]{Keo:58}
+%R.~Keohane.
+%\newblock \emph{Power and Interdependence: World Politics in Transitions}.
+%\newblock Little, Brown \& Co., Boston, 1958.
+
+%\bibitem[Powers(1985)]{Pow:85}
+%T.~Powers.
+%\newblock Is there a way out?
+%\newblock \emph{Harpers}, pages 35--47, June 1985.
+
+%\bibitem[Soukhanov(1992)]{Heritage:92}
+%A.~H. Soukhanov, editor.
+%\newblock \emph{{The American Heritage. Dictionary of the American Language}}.
+%\newblock Houghton Mifflin Company, 1992.
+
+%\end{thebibliography}
+
+
+                                                                         % in the appendices.
+\end{document}

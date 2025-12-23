@@ -5,12 +5,25 @@ import os
 
 
 class NavigationEnvironment:
-    def __init__(self, image_files, centers_dict, view_size=(64, 64), max_steps=100, history_length=5):
+    def __init__(
+        self,
+        image_files,
+        centers_dict,
+        view_size=(64, 64),
+        max_steps=100,
+        history_length=5,
+        slip_prob=0.0,
+        state_mode="grid",  # "grid" or "distance"
+        target_radius=10,   # radius for distance-based target state
+    ):
         self.image_files = image_files
         self.centers_dict = centers_dict
         self.view_size = view_size
         self.max_steps = max_steps
         self.history_length = history_length
+        self.slip_prob = slip_prob
+        self.state_mode = state_mode
+        self.target_radius = target_radius
         
         self.num_actions = 5
         self.move_step = 20
@@ -18,6 +31,7 @@ class NavigationEnvironment:
         self.current_image = None
         self.current_image_path = None
         self.current_center = None
+        self.current_center_grid = None
         self.current_position = None
         self.current_view = None
         self.steps_taken = 0
@@ -31,6 +45,7 @@ class NavigationEnvironment:
         
         filename = os.path.basename(self.current_image_path)
         self.current_center = self.centers_dict.get(filename, (128, 128))
+        self.current_center_grid = self._pos_to_grid(self.current_center)
         
         img_width, img_height = self.current_image.size
         margin = max(self.view_size) // 2
@@ -49,7 +64,8 @@ class NavigationEnvironment:
     def step(self, action):
         prev_distance = self._calculate_distance_to_center()
         
-        self._apply_action(action)
+        actual_action = self._sample_action(action)
+        self._apply_action(actual_action)
         self.steps_taken += 1
         
         self.position_history.append(self.current_position)
@@ -61,16 +77,31 @@ class NavigationEnvironment:
         distance = self._calculate_distance_to_center()
         reward = self._calculate_reward(distance)
         
-        done = distance < 10 or self.steps_taken >= self.max_steps
+        done = self.is_at_target() or self.steps_taken >= self.max_steps
         
         info = {
             'distance': distance,
             'position': self.current_position,
             'center': self.current_center,
-            'steps': self.steps_taken
+            'steps': self.steps_taken,
+            'intended_action': action,
+            'actual_action': actual_action,
+            'position_grid': self._pos_to_grid(self.current_position),
+            'center_grid': self.current_center_grid,
+            'state_id': self.get_state_id(self.current_position),
+            'target_state_id': self.get_target_state_id(),
+            'state_mode': self.state_mode,
         }
         
         return self.current_view, reward, done, info
+
+    def _sample_action(self, intended_action):
+        """Introduce stochasticity: with slip_prob choose a different action."""
+        if random.random() >= self.slip_prob:
+            return intended_action
+        
+        alternatives = [a for a in range(self.num_actions) if a != intended_action]
+        return random.choice(alternatives)
 
     def _apply_action(self, action):
         x, y = self.current_position
@@ -152,6 +183,124 @@ class NavigationEnvironment:
         step_penalty = -0.05
         
         return distance_reward + step_penalty + oscillation_penalty + progress_reward
+
+    # ---------- Grid helpers ----------
+    def _pos_to_grid(self, pos):
+        x, y = pos
+        margin = max(self.view_size) // 2
+        move = self.move_step
+        img_w, img_h = self.current_image.size if self.current_image else (256, 256)
+        usable_w = img_w - 2 * margin
+        usable_h = img_h - 2 * margin
+        nx = int(np.floor(usable_w / move)) + 1
+        ny = int(np.floor(usable_h / move)) + 1
+        i = int(round((x - margin) / move))
+        j = int(round((y - margin) / move))
+        i = max(0, min(i, nx - 1))
+        j = max(0, min(j, ny - 1))
+        return (i, j)
+
+    def grid_size(self):
+        margin = max(self.view_size) // 2
+        move = self.move_step
+        img_w, img_h = self.current_image.size if self.current_image else (256, 256)
+        usable_w = img_w - 2 * margin
+        usable_h = img_h - 2 * margin
+        nx = int(np.floor(usable_w / move)) + 1
+        ny = int(np.floor(usable_h / move)) + 1
+        return nx, ny
+
+    def _same_grid_as_center(self):
+        return self._pos_to_grid(self.current_position) == self.current_center_grid
+
+    # ---------- Distance-based state helpers ----------
+    def _pos_to_distance_state(self, pos):
+        """
+        Distance-based state abstraction:
+        - If distance to target < target_radius: return target state (special ID)
+        - Otherwise: return position-based state ID using move_step discretization
+        
+        State space: discretize by move_step (20 pixels default) - same as grid mode
+        but with distance-based target detection instead of grid-based.
+        Target state is the last state ID (num_states - 1)
+        """
+        x, y = pos
+        distance = np.sqrt(
+            (x - self.current_center[0]) ** 2 + 
+            (y - self.current_center[1]) ** 2
+        )
+        
+        # Get grid dimensions using move_step (same as grid mode)
+        img_w, img_h = self.current_image.size if self.current_image else (256, 256)
+        margin = max(self.view_size) // 2
+        step = self.move_step  # Use move_step for finer granularity
+        
+        usable_w = img_w - 2 * margin
+        usable_h = img_h - 2 * margin
+        nx = int(np.floor(usable_w / step)) + 1
+        ny = int(np.floor(usable_h / step)) + 1
+        
+        if distance < self.target_radius:
+            # Target state is the last state ID
+            return (nx * ny, nx, ny)  # (state_id, nx, ny) - target state
+        else:
+            # Discretize position using same method as grid mode
+            i = int(round((x - margin) / step))
+            j = int(round((y - margin) / step))
+            i = max(0, min(i, nx - 1))
+            j = max(0, min(j, ny - 1))
+            state_id = i * ny + j
+            return (state_id, nx, ny)
+
+    def distance_state_size(self):
+        """Return (nx, ny, num_states) for distance-based mode."""
+        img_w, img_h = self.current_image.size if self.current_image else (256, 256)
+        margin = max(self.view_size) // 2
+        step = self.move_step  # Use move_step for finer granularity
+        
+        usable_w = img_w - 2 * margin
+        usable_h = img_h - 2 * margin
+        nx = int(np.floor(usable_w / step)) + 1
+        ny = int(np.floor(usable_h / step)) + 1
+        # +1 for the target state
+        return nx, ny, nx * ny + 1
+
+    def get_state_id(self, pos):
+        """Get state ID based on current state_mode."""
+        if self.state_mode == "distance":
+            state_id, _, _ = self._pos_to_distance_state(pos)
+            return state_id
+        else:
+            # Grid mode
+            grid = self._pos_to_grid(pos)
+            _, ny = self.grid_size()
+            return grid[0] * ny + grid[1]
+
+    def get_target_state_id(self):
+        """Get the target state ID based on current state_mode."""
+        if self.state_mode == "distance":
+            _, nx, ny = self._pos_to_distance_state(self.current_center)
+            return nx * ny  # Target state is the last ID
+        else:
+            ny = self.grid_size()[1]
+            return self.current_center_grid[0] * ny + self.current_center_grid[1]
+
+    def get_num_states(self):
+        """Get total number of states based on current state_mode."""
+        if self.state_mode == "distance":
+            _, _, num_states = self.distance_state_size()
+            return num_states
+        else:
+            nx, ny = self.grid_size()
+            return nx * ny
+
+    def is_at_target(self):
+        """Check if agent is at target based on current state_mode."""
+        if self.state_mode == "distance":
+            distance = self._calculate_distance_to_center()
+            return distance < self.target_radius
+        else:
+            return self._same_grid_as_center()
 
     def _is_oscillating(self):
         if len(self.position_history) < 4:

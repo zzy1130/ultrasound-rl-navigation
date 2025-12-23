@@ -1,0 +1,39 @@
+# Ignore large files for Railway upload
+
+# Node modules (HUGE - will be rebuilt)
+webapp/
+node_modules/
+
+# Git history
+.git/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Data and media files
+data/
+*.gif
+*.mp4
+*.png
+*.jpg
+*.jpeg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+
+# Lock files (will be regenerated)
+uv.lock
+package-lock.json
+

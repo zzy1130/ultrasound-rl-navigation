@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+*.egg-info
+.venv
+venv
+
+# Node
+webapp/node_modules
+webapp/.vite
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Build artifacts
+*.log
+.DS_Store
+
+# Large files (keep models)
+data/
+*.gif
+*.mp4
+
+# Documentation
+*.md
+!README.md
+

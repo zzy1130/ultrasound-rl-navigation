@@ -50,6 +50,45 @@ python main.py --mode pipeline
 python main.py --mode demo --image path/to/your/image.png
 ```
 
+## ⚡ Using uv (recommended for mac/CPU)
+
+1. Install uv  
+```bash
+curl -Ls https://astral.sh/uv/install.sh | sh
+```
+
+2. 安装依赖（默认 CPU/MPS）  
+```bash
+uv sync            # 或者包含可选依赖: uv sync --extra full
+```
+
+3. 运行
+```bash
+uv run python main.py --mode pipeline
+uv run python main.py --mode demo --image /abs/path/to/img.png \
+  --seg_model ./results/trained_models/simple_resnet_unet_best.pth \
+  --nav_model ./results/trained_models/agent_final.pt
+```
+
+使用 Apple Silicon 会自动尝试 MPS，如需指定可设置环境变量：`PYTORCH_ENABLE_MPS_FALLBACK=1`。
+
+### 🤖 随机性选项
+- **策略随机性（推荐）**：`NavigationAgent.act(..., stochastic_policy=True, temperature=1.0)` 使用 softmax 对 Q 值采样动作（温度越高越随机）。训练时仍可用 epsilon-greedy；评估时可选 deterministic（argmax）或 softmax 采样。
+- **环境随机性（可选）**：`NavigationEnvironment(slip_prob=0.0)` 默认为 0；若需模拟执行滑移，可设为 >0，使动作以该概率被替换为其他动作。
+
+### ▶️ 启动脚本（API + Web）
+- 后端 API（FastAPI，端口 8000）：
+  ```bash
+  uv run uvicorn api:app --port 8000 --reload
+  ```
+- 前端（Vite + React，默认 5173）：
+  ```bash
+  cd webapp
+  npm install
+  npm run dev
+  ```
+  如需指定后端地址，设置 `VITE_API_URL` 环境变量。
+
 ## 📁 Repository Structure
 
 ```

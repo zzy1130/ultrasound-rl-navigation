@@ -39,6 +39,35 @@ class DQN(nn.Module):
         return self.fc_layers(conv_out)
 
 
+class LegacyDQN(nn.Module):
+    """
+    Legacy architecture to load checkpoints that store keys like
+    features.* and fc.* (as in results/trained_models/agent_final.pt).
+    Two conv layers with stride 2 to downsample 64x64 -> 16x16.
+    Conv modules are positioned at indices 0 and 3 to match checkpoint keys.
+    """
+
+    def __init__(self, input_channels=1, num_actions=5):
+        super(LegacyDQN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(input_channels, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=True),  # placeholder to shift index
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(64 * 16 * 16, 256),  # fc.0
+            nn.ReLU(inplace=True),
+            nn.Linear(256, num_actions),   # fc.2
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
+
+
 class NavigationAgent:
     def __init__(self, num_actions, learning_rate=0.0005, gamma=0.99, 
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995,
@@ -67,14 +96,22 @@ class NavigationAgent:
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
     
-    def act(self, state, training=True):
+    def act(self, state, training=True, stochastic_policy=False, temperature=1.0):
+        # Epsilon exploration (training only)
         if training and random.random() < self.epsilon:
             return random.randrange(self.num_actions)
         
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.q_network(state_tensor)
-            return q_values.max(1)[1].item()
+            q_values = self.q_network(state_tensor).squeeze(0)
+
+            if stochastic_policy:
+                # Softmax sampling for stochastic policy
+                probs = torch.softmax(q_values / max(1e-6, temperature), dim=0)
+                return torch.multinomial(probs, 1).item()
+
+            # Deterministic argmax
+            return q_values.max(0)[1].item()
     
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -119,8 +156,26 @@ class NavigationAgent:
     
     def load(self, filepath):
         checkpoint = torch.load(filepath, map_location=self.device)
-        self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
-        self.target_network.load_state_dict(checkpoint['target_network_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.epsilon = checkpoint['epsilon']
-        self.steps_done = checkpoint['steps_done']
+        # New-format checkpoint
+        if 'q_network_state_dict' in checkpoint:
+            self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
+            self.target_network.load_state_dict(checkpoint['target_network_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.epsilon = checkpoint.get('epsilon', self.epsilon)
+            self.steps_done = checkpoint.get('steps_done', self.steps_done)
+        # Legacy checkpoint with policy_net/target_net keys
+        elif 'policy_net' in checkpoint and 'target_net' in checkpoint:
+            legacy_q = LegacyDQN(num_actions=self.num_actions).to(self.device)
+            legacy_target = LegacyDQN(num_actions=self.num_actions).to(self.device)
+            legacy_q.load_state_dict(checkpoint['policy_net'])
+            legacy_target.load_state_dict(checkpoint['target_net'])
+            self.q_network = legacy_q
+            self.target_network = legacy_target
+            # Reset optimizer to match new parameter set
+            self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.optimizer.param_groups[0]['lr'])
+            # Optimizer state may not match; skip to avoid size errors
+            self.epsilon = checkpoint.get('epsilon', self.epsilon)
+            self.steps_done = checkpoint.get('episode_count', self.steps_done)
+        else:
+            raise KeyError("Unrecognized checkpoint format")

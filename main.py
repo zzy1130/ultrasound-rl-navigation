@@ -3,12 +3,13 @@ import numpy as np
 import os
 import glob
 import json
+import matplotlib.pyplot as plt
 from PIL import Image
 
-from core.segmentation_model import ResNetUNet
+from core.segmentation_model import ResNetUNet, load_segmentation_model
 from core.navigation_agent import NavigationAgent
 from core.navigation_environment import NavigationEnvironment
-from core.utils import find_center, visualize_segmentation, visualize_navigation
+from core.utils import find_center, visualize_segmentation, visualize_navigation, create_navigation_gif
 from train_segmentation import train_segmentation_model
 from train_navigation import train_navigation_agent, evaluate_agent
 
@@ -17,10 +18,7 @@ def segment_images(model_path, image_dir, save_dir):
     """Segment images and find centers"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    model = ResNetUNet()
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()
+    model = load_segmentation_model(model_path, device)
     
     os.makedirs(save_dir, exist_ok=True)
     
@@ -29,6 +27,7 @@ def segment_images(model_path, image_dir, save_dir):
     
     for i, image_path in enumerate(image_files):
         image = Image.open(image_path).convert('L')
+        orig_w, orig_h = image.size
         image_resized = image.resize((256, 256))
         
         image_tensor = torch.FloatTensor(np.array(image_resized) / 255.0).unsqueeze(0).unsqueeze(0).to(device)
@@ -39,16 +38,20 @@ def segment_images(model_path, image_dir, save_dir):
         mask = mask_tensor.squeeze().cpu().numpy()
         mask = (mask > 0.5).astype(np.uint8) * 255
         
-        center = find_center(mask)
+        center_resized = find_center(mask)
+        if (orig_w, orig_h) != (256, 256):
+            center_env = (int(center_resized[0] * orig_w / 256), int(center_resized[1] * orig_h / 256))
+        else:
+            center_env = center_resized
         
         filename = os.path.basename(image_path)
-        centers_dict[filename] = center
+        centers_dict[filename] = center_env
         
         if i < 10:
             visualize_segmentation(
                 np.array(image_resized),
                 mask,
-                center,
+                center_resized,
                 os.path.join(save_dir, f"segmentation_{i}.png")
             )
     
@@ -149,21 +152,19 @@ def run_complete_pipeline():
     print(f"Average final distance: {eval_metrics['avg_final_distance']:.2f}")
 
 
-def demo_single_image(image_path, segmentation_model_path, navigation_model_path):
-    """Demo on a single image"""
+def demo_single_image(image_path, segmentation_model_path, navigation_model_path, nav_gif_path=None):
+    """Demo on a single image. Optionally save navigation GIF."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Load models
-    seg_model = ResNetUNet()
-    seg_model.load_state_dict(torch.load(segmentation_model_path, map_location=device))
-    seg_model.to(device)
-    seg_model.eval()
+    seg_model = load_segmentation_model(segmentation_model_path, device)
     
     nav_agent = NavigationAgent(num_actions=5, device=device)
     nav_agent.load(navigation_model_path)
     
     # Process image
     image = Image.open(image_path).convert('L')
+    orig_w, orig_h = image.size
     image_resized = image.resize((256, 256))
     
     # Segment
@@ -173,27 +174,47 @@ def demo_single_image(image_path, segmentation_model_path, navigation_model_path
     
     mask = mask_tensor.squeeze().cpu().numpy()
     mask = (mask > 0.5).astype(np.uint8) * 255
-    center = find_center(mask)
+    center_resized = find_center(mask)
+    if (orig_w, orig_h) != (256, 256):
+        center_env = (int(center_resized[0] * orig_w / 256), int(center_resized[1] * orig_h / 256))
+    else:
+        center_env = center_resized
     
     # Navigate
-    centers_dict = {os.path.basename(image_path): center}
+    centers_dict = {os.path.basename(image_path): center_env}
     env = NavigationEnvironment([image_path], centers_dict)
     
     state = env.reset()
     positions = [env.current_position]
+    frames = []
     
     for step in range(50):
-        action = nav_agent.act(state, training=False)
+        action = nav_agent.act(state, training=False, stochastic_policy=False, temperature=1.0)
         next_state, reward, done, info = env.step(action)
         positions.append(env.current_position)
         state = next_state
+        
+        if nav_gif_path:
+            fig = visualize_navigation(
+                np.array(image),
+                env.current_position,
+                center_env,
+                env.view_size
+            )
+            fig.canvas.draw()
+            rgba = np.asarray(fig.canvas.buffer_rgba())
+            frames.append(Image.fromarray(rgba[..., :3]))
+            plt.close(fig)
         
         if done:
             break
     
     # Visualize results
-    visualize_segmentation(np.array(image_resized), mask, center, "demo_segmentation.png")
-    visualize_navigation(np.array(image), env.current_position, center, save_path="demo_navigation.png")
+    visualize_segmentation(np.array(image_resized), mask, center_resized, "demo_segmentation.png")
+    visualize_navigation(np.array(image), env.current_position, center_env, save_path="demo_navigation.png")
+    
+    if nav_gif_path and frames:
+        create_navigation_gif(frames, nav_gif_path, duration=200)
     
     print(f"Demo completed! Final distance to target: {info['distance']:.2f}")
     return info['distance']
@@ -210,6 +231,7 @@ if __name__ == "__main__":
                        help='Path to segmentation model')
     parser.add_argument('--nav_model', type=str, default='./results/trained_models/agent_final.pt',
                        help='Path to navigation model')
+    parser.add_argument('--nav_gif', type=str, help='Optional path to save navigation GIF')
 
     args = parser.parse_args()
 
@@ -219,4 +241,4 @@ if __name__ == "__main__":
         if not args.image:
             print("Please provide --image path for demo mode")
         else:
-            demo_single_image(args.image, args.seg_model, args.nav_model)
+            demo_single_image(args.image, args.seg_model, args.nav_model, nav_gif_path=args.nav_gif)
