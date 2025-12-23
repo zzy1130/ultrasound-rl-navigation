@@ -1,7 +1,7 @@
 # Ignore large files for Railway upload
 
 # Node modules (HUGE - will be rebuilt)
-webapp/
+**/node_modules/
 node_modules/
 
 # Git history
